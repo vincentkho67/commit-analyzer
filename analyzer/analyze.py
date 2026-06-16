@@ -27,11 +27,30 @@ MODEL = "gpt-4o"
 
 SYSTEM_PROMPT = (
     "You are a senior engineering manager auditing one week of a developer's "
-    "commits. The developer uses AI coding tools, so estimate time from the "
-    "NOVELTY of the change, not its size — large mechanical or generated diffs "
-    "are fast; small algorithmic or architectural changes are slow. For the "
-    "commit you receive (message, files, additions/deletions, truncated patch) "
-    "return STRICT JSON, no prose, no markdown fences:\n"
+    "commits. The developer uses AI coding tools.\n\n"
+    "TIME — estimate from the NOVELTY of the change, NEVER from line count. "
+    "Large mechanical or generated diffs are fast; small algorithmic or "
+    "architectural changes are slow. Do NOT scale estimated_active_minutes with "
+    "additions/deletions: a 2000-line lockfile, a formatting sweep, or a "
+    "generated/boilerplate file takes minutes no matter how large, while a "
+    "30-line concurrency fix, parser, or subtle algorithm can take hours. Set "
+    "the complexity bucket from novelty, then let time follow the bucket — not "
+    "the diff size:\n"
+    "  - trivial : generated/vendored files, lockfiles, dependency bumps, "
+    "formatting/whitespace, pure renames or moves, mechanical find-replace, "
+    "trivial config — a few minutes regardless of diff size.\n"
+    "  - routine : ordinary application code, wiring, CRUD, standard patterns, "
+    "straightforward refactors — tens of minutes.\n"
+    "  - complex : non-obvious logic, careful edge cases, cross-module "
+    "integration, subtle correctness — up to a couple of hours.\n"
+    "  - novel   : original algorithms, data-structure or architecture design, "
+    "concurrency, or hard correctness — slow even when the diff is tiny.\n"
+    "Weigh the most novel part of the change, not its biggest file. "
+    "traditional_estimate_minutes is the SAME task for a solo dev WITHOUT AI "
+    "tools — usually larger, and the gap is widest for routine/boilerplate work "
+    "that AI accelerates most (near-parity for genuinely novel thinking).\n\n"
+    "For the commit you receive (message, files, additions/deletions, truncated "
+    "patch) return STRICT JSON, no prose, no markdown fences:\n"
     "{\n"
     '  "quality": {"score": 1-10, "strengths": [..], "issues": [..], '
     '"evidence": [".. short quoted line .."]},\n'
@@ -97,14 +116,42 @@ class WeeklySummary:
 # --------------------------------------------------------------------------- #
 # Prompt construction
 # --------------------------------------------------------------------------- #
+# Names / path fragments / suffixes that signal mechanical or generated diffs,
+# so the model can discount their size when estimating novelty-based time.
+_GENERATED_NAMES = {
+    "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "poetry.lock",
+    "pipfile.lock", "cargo.lock", "composer.lock", "gemfile.lock", "go.sum",
+}
+_GENERATED_SUFFIXES = (".lock", ".min.js", ".min.css", ".map", ".snap")
+_GENERATED_FRAGMENTS = (
+    "/vendor/", "/node_modules/", "/dist/", "/build/", "/.next/",
+    "generated", "__generated__", ".pb.go", "_pb2.py",
+)
+
+
+def _looks_generated(path: str) -> bool:
+    """Heuristic: is this a generated/vendored/lock file (mechanical, fast)?"""
+    p = path.lower()
+    name = p.rsplit("/", 1)[-1]
+    if name in _GENERATED_NAMES:
+        return True
+    if p.endswith(_GENERATED_SUFFIXES):
+        return True
+    return any(frag in p for frag in _GENERATED_FRAGMENTS)
+
+
 def build_commit_prompt(commit: Commit, redact: bool = False) -> str:
     """Render one commit into the user message for the model."""
     lines = [f"Commit message:\n{commit.message or '(empty)'}", ""]
     lines.append(f"Files changed ({len(commit.files)}):")
     for f in commit.files:
-        lines.append(f"- {f.status} {f.path} (+{f.additions}/-{f.deletions})")
+        flag = " [likely generated/mechanical — discount size]" if _looks_generated(f.path) else ""
+        lines.append(f"- {f.status} {f.path} (+{f.additions}/-{f.deletions}){flag}")
     lines.append("")
-    lines.append(f"Totals: +{commit.additions}/-{commit.deletions}")
+    lines.append(
+        f"Totals: +{commit.additions}/-{commit.deletions} "
+        "(line counts are context only — estimate time from novelty, not size)"
+    )
 
     if not redact:
         lines.append("\nDiffs (patches truncated to 3000 chars each):")
