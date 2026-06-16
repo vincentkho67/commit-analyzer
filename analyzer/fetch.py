@@ -161,6 +161,14 @@ def _iter_commit_pages(client: httpx.Client, repo: str, since: str) -> Iterator[
 # --------------------------------------------------------------------------- #
 # Public API
 # --------------------------------------------------------------------------- #
+def get_authenticated_login(client: httpx.Client) -> str | None:
+    """The login of the user owning the token — used as the default author ('you')."""
+    try:
+        return _get(client, "/user").json().get("login")
+    except RuntimeError:
+        return None
+
+
 def get_commit_detail(client: httpx.Client, repo: str, sha: str) -> Commit:
     """Fetch full per-file stats + (truncated) patch for one commit."""
     resp = _get(client, f"/repos/{repo}/commits/{sha}")
