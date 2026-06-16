@@ -17,4 +17,3 @@ dist/
 venv/
 
 # Transient run output (sample_output.md is the committed deliverable)
-report.md
