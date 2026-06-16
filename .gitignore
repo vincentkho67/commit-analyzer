@@ -1,0 +1,20 @@
+# Secrets — keys live in the shared parent ../.env, never committed
+.env
+*.env
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+build/
+dist/
+
+# Virtualenvs
+.venv/
+venv/
+
+# Transient run output (sample_output.md is the committed deliverable)
+report.md
